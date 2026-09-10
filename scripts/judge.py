@@ -1,54 +1,95 @@
-"""LLM judge blinded on 4 dims + overall + hallucinated. --help/--sample-n/--seed/--out."""
+"""LLM judge (gemini primary, gpt second) blinded on rubric; heuristic fallback. --help/--sample-n/--seed/--out."""
 import argparse, json, os, re, pandas as pd, numpy as np
-def parse(s):
-    nums = re.findall(r"[1-5]", str(s))
-    hall = "yes" if re.search(r"hallucinated\s*[:=]\s*yes", str(s), re.I) else "no"
-    dims = (list(map(int, nums[:5])) + [3]*5)[:5]
-    return dims + [hall]
+try:
+    from dotenv import load_dotenv; load_dotenv(".env", override=True)
+except Exception: pass
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+try:
+    from pydantic import BaseModel, confloat
+    from typing import Literal
+    class JudgeOut(BaseModel):
+        groundedness: int; helpfulness: int; tone: int; safety: int; overall: int
+        hallucinated: Literal["yes", "no"]
+    _HAVE_PYDANTIC = True
+except Exception: _HAVE_PYDANTIC = False
+def heuristic(r):
+    cand, cust = str(r.reply), str(r.customer_text)
+    STOP = set("the,a,an,to,for,and,or,of,on,in,is,are,you,your,we,us,our,it,its,this,that,with,what,when,how,have,has,had,do,does,did,can,will,please,hi,hey,thanks,thank,my,me,i,so,but,if,then,than,there,their,they,them,at,by,from,up,out,about,into,over,after".split(","))
+    cw = {w.strip(".,!?;:'\"()").lower() for w in cust.split()} - STOP
+    rw = {w.strip(".,!?;:'\"()").lower() for w in cand.split()} - STOP
+    cw = {w for w in cw if len(w) > 2}; rw = {w for w in rw if len(w) > 2}
+    overlap = len(cw & rw)
+    grounded = 5 if overlap >= 4 else (4 if overlap == 3 else (3 if overlap == 2 else (2 if overlap == 1 else 1)))
+    if str(r.get("intent", "")) == str(r.get("intent_gold", "")) and grounded < 5: grounded += 1
+    helpful = 5 if ("?" in cand and ("dm" in cand.lower() or "http" in cand or "setting" in cand.lower())) else (4 if "?" in cand else (3 if len(cand) > 60 else 2))
+    tone = 2 if re.search(r"\b(damn|stupid|idiot|hate you)\b", cand, re.I) or (cand.isupper() and len(cand) > 10) else 5
+    hall = "yes" if re.search(r"order #\d+|guarantee|promise.*refund|will refund", cand, re.I) else "no"
+    safety = 2 if (hall == "yes" or re.search(r"password|ssn|card number", cand, re.I)) else 5
+    overall = min(grounded, helpful, tone, safety)
+    return [grounded, helpful, tone, safety, overall, hall]
+_JUSE = {"calls": 0, "ok": 0, "llm_rows": 0}
+def llm_judge(rubric, r):
+    global _JUSE
+    msg = "GOLDEN REFERENCE: " + str(r.reply_reference) + "\nCANDIDATE REPLY: " + str(r.reply) + "\nCUSTOMER: " + str(r.customer_text)[:300] + "\nReturn JSON only: {\"groundedness\": 1-5, \"helpfulness\": 1-5, \"tone\": 1-5, \"safety\": 1-5, \"overall\": 1-5, \"hallucinated\": \"yes\"/\"no\"}"
+    order = []
+    if os.environ.get("GEMINI_API_KEY") and os.environ.get("GEMINI_ENABLE") and _HAVE_PYDANTIC: order.append("gemini")
+    if os.environ.get("OPENAI_API_KEY") and _HAVE_PYDANTIC: order.append("gpt")
+    for which in order:
+        _JUSE["calls"] += 1
+        try:
+            if which == "gemini":
+                import time
+                from google import genai
+                g = genai.Client()
+                resp = g.models.generate_content(model=GEMINI_MODEL, contents=rubric + "\n" + msg)
+                t = re.sub(r"^```(json)?|```$", "", resp.text.strip()).strip()
+                d = JudgeOut.model_validate_json(t)
+                _JUSE["ok"] += 1; _JUSE["llm_rows"] += 1
+                return [d.groundedness, d.helpfulness, d.tone, d.safety, d.overall, d.hallucinated, "gemini-llm"]
+            import time
+            from openai import OpenAI
+            c = OpenAI()
+            resp, err = None, ""
+            for i in range(3):
+                try:
+                    resp = c.chat.completions.create(model=OPENAI_MODEL, response_format={"type": "json_object"},
+                        messages=[{"role": "system", "content": rubric}, {"role": "user", "content": msg}],
+                        max_completion_tokens=1000); break
+                except Exception as e:
+                    err = str(e)[:100]; print(f"gpt judge try {i+1}: {err}"); time.sleep(3 * (i + 1))
+            if resp is None: raise RuntimeError(err)
+            d = JudgeOut.model_validate_json(resp.choices[0].message.content)
+            _JUSE["ok"] += 1; _JUSE["llm_rows"] += 1
+            return [d.groundedness, d.helpfulness, d.tone, d.safety, d.overall, d.hallucinated, "gpt-llm"]
+        except Exception as e:
+            print(f"JUDGE {which} FAIL id={r['id']}: {str(e)[:120]}")
+    return None
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pred", default="results/predictions_main.jsonl"); ap.add_argument("--golden", default="data/golden.csv")
     ap.add_argument("--out", default="results/judge_scores.csv"); ap.add_argument("--sample-n", type=int, default=None)
     ap.add_argument("--seed", type=int, default=42)
     a = ap.parse_args()
-    g = pd.read_csv(a.golden); preds = pd.read_json(a.pred, lines=True, dtype={"id": str})
+    g = pd.read_csv(a.golden); preds = pd.read_json(a.pred, lines=True)
     preds["id"]=preds["id"].astype(str); g["id"]=g["id"].astype(str)
     m = g.merge(preds, on="id").sample(frac=1.0, random_state=a.seed).reset_index(drop=True)
     if a.sample_n: m = m.head(a.sample_n)
     rubric = open("prompts/judge_rubric.txt").read()
     assert "main" not in rubric.lower() and "baseline" not in rubric.lower(), "judge prompt not blind"
     rows = []
-    use_llm = bool(os.environ.get("OPENAI_API_KEY"))
-    c = None
-    if use_llm:
-        try: from openai import OpenAI; c = OpenAI()
-        except Exception as e: print("openai init failed:", e); use_llm = False
     for _, r in m.iterrows():
-        if use_llm:
-            try:
-                msg = f"GOLDEN REFERENCE: {r.reply_reference}\nCANDIDATE REPLY: {r.reply}\nINTENT gold={r.intent_gold} pred={r.intent}"
-                resp = c.chat.completions.create(model="gpt-4o-mini", temperature=0,
-                    messages=[{"role":"system","content":rubric},{"role":"user","content":msg+"\nReturn: groundedness helpfulness tone safety overall (1-5 each) + hallucinated:yes/no"}], max_tokens=150)
-                dims = parse(resp.choices[0].message.content)
-            except Exception as e: print("judge call failed:", e); dims = [3,3,3,3,3,"no"]
-        else:
-            # ponytail: transparent heuristic fallback (no LLM credits); documented as model=heuristic
-            cand = str(r.reply); cust = str(r.customer_text)
-            import re as _re
-            STOP = set("the,a,an,to,for,and,or,of,on,in,is,are,you,your,we,us,our,it,its,this,that,with,what,when,how,have,has,had,do,does,did,can,will,please,hi,hey,thanks,thank,my,me,i,so,but,if,then,than,there,their,they,them,at,by,from,up,out,about,into,over,after,my".split(","))
-            cw = set(w.strip(".,!?;:'\"()").lower() for w in cust.split()) - STOP
-            rw = set(w.strip(".,!?;:'\"()").lower() for w in cand.split()) - STOP
-            cw = {w for w in cw if len(w) > 2}; rw = {w for w in rw if len(w) > 2}
-            overlap = len(cw & rw)
-            grounded = 5 if overlap >= 4 else (4 if overlap == 3 else (3 if overlap == 2 else (2 if overlap == 1 else 1)))
-            if str(r.get("intent", "")) == str(r.get("intent_gold", "")) and grounded < 5: grounded += 1  # retrieved for the right intent
-            helpful = 5 if ("?" in cand and ("dm" in cand.lower() or "http" in cand or "setting" in cand.lower())) else (4 if "?" in cand else (3 if len(cand) > 60 else 2))
-            tone = 2 if _re.search(r"\\b(damn|stupid|idiot|hate you)\\b", cand, _re.I) or (cand.isupper() and len(cand) > 10) else 5
-            hall = "yes" if _re.search(r"order #\\d+|guarantee|promise.*refund|will refund", cand, _re.I) else "no"
-            safety = 2 if (hall == "yes" or _re.search(r"password|ssn|card number", cand, _re.I)) else 5
-            overall = min(grounded, helpful, tone, safety)  # overall limited by weakest dim, per rubric
-            dims = [grounded, helpful, tone, safety, overall, hall]
-        rows.append({"id": r["id"], "groundedness": dims[0], "helpfulness": dims[1], "tone": dims[2], "safety": dims[3], "overall": dims[4], "hallucinated": dims[5], "model": "gpt-4o-mini" if use_llm else "heuristic-fallback"})
+        d = llm_judge(rubric, r)
+        if d is None:
+            h = heuristic(r); d = h + ["heuristic-fallback"]
+        rows.append({"id": r["id"], "groundedness": d[0], "helpfulness": d[1], "tone": d[2], "safety": d[3], "overall": d[4], "hallucinated": d[5], "model": d[6]})
+    import json as _j
+    rate = _JUSE["ok"] / max(_JUSE["calls"], 1)
+    print(f"JUDGE SUMMARY calls={_JUSE['calls']} ok={_JUSE['ok']} llm_rows={_JUSE['llm_rows']}/{len(rows)}")
+    _j.dump(_JUSE, open("results/judge_usage.json", "w"), indent=2)
+    floor = float(os.environ.get("LLM_MIN_SUCCESS", "0.8"))
+    if _JUSE["calls"] > 0 and _JUSE["llm_rows"] / max(len(rows), 1) < floor:
+        raise SystemExit(f"ABORT: only {_JUSE['llm_rows']}/{len(rows)} rows llm-judged -- refusing mixed-scale scores")
     pd.DataFrame(rows).to_csv(a.out, index=False)
     print(f"wrote {a.out} mean_overall={np.mean([r['overall'] for r in rows]):.2f}")
 if __name__ == "__main__": main()

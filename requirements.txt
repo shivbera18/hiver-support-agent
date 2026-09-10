@@ -12,3 +12,6 @@ matplotlib
 langdetect
 kagglehub
 scipy
+pydantic>=2.0
+python-dotenv
+google-genai
