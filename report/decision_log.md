@@ -1,0 +1,15 @@
+# Decision log
+- AppleSupport over airlines: volume + scopable troubleshooting, less moderation risk. Rejected: airlines (anger/delay spikes).
+- 10 intents not 77: covers ~90% traffic, labellable in budget. Rejected: Banking77 taxonomy (domain mismatch).
+- Time-split 80/20 not shuffle: prevents temporal leakage. Rejected: random split.
+- MiniLM local embeddings default: free/offline/<15min. Rejected: OpenAI embeddings (cost+friction).
+- gpt-4o-mini + TF-IDF fallback: $1 total, pipeline runs keyless. Rejected: larger models.
+- Threshold 0.55 w/ recall floor 0.85: tuned once on B1 dev. Rejected: per-system tuning (overfits headline).
+- 200 golden stratified+adversarial: inside 150-250 band. Rejected: more rows (labelling cost).
+- Single-turn fallback for orphans (~30%): context optional. Rejected: dropping orphans.
+- Banking77 few-shot wording only: never train on it. Rejected: joint training (inflates numbers).
+- Blinded judge (no system name): prevents favoritism. Rejected: named comparison.
+- kappa>=0.60 / rho>=0.50 bars, downgrade-not-resample: honesty over chasing.
+- No fine-tune, no live posting, no multilingual: batch pipeline scope. Rejected: service/DB/UI.
+- Heuristic judge with overall=min(dims) after credits ran out: customer-overlap grounding + intent-match bonus; reported directional-only (rho 0.25). Rejected: constant-3 fallback (zero signal) and pretending scores are LLM-judged.
+- billing_refund intent always escalates + widened risk stems (charg/phish/expir): risk recall 0.80 -> 0.93. Rejected: lowering the 0.55 threshold (would overfit the headline).
