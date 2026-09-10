@@ -13,3 +13,4 @@
 - No fine-tune, no live posting, no multilingual: batch pipeline scope. Rejected: service/DB/UI.
 - Heuristic judge with overall=min(dims) after credits ran out: customer-overlap grounding + intent-match bonus; reported directional-only (rho 0.25). Rejected: constant-3 fallback (zero signal) and pretending scores are LLM-judged.
 - billing_refund intent always escalates + widened risk stems (charg/phish/expir): risk recall 0.80 -> 0.93. Rejected: lowering the 0.55 threshold (would overfit the headline).
+- Experiment loop with PR-style review: LSA retrieval rejected (judge 2.04, torch MiniLM unloadable on this box and dense SVD drops keywords), ComplementNB rejected (acc 0.675 < 0.705 despite esc recall 0.97), intent-filtered retrieval merged + default-on (judge 2.46, zero intent change). Review forced one cleanup: single shared weak-label map. Rejected: keeping experiments env-gated forever.

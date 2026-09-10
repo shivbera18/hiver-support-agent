@@ -27,8 +27,8 @@
       20
     ]
   ],
-  "rougeL": 0.1046,
-  "reply_cosine": 0.0722,
+  "rougeL": 0.1194,
+  "reply_cosine": 0.0844,
   "esc_rate": 0.42,
-  "mean_reply_len": 129.3
+  "mean_reply_len": 135.2
 }

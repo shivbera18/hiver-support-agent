@@ -105,7 +105,7 @@ neighbour reply (min cosine 0.15 else canned), escalate if `max_proba < 0.60` or
 |---|---|---|---|---|---|
 | B0 trivial | 0.415 | 0.059 | 0.160 / 1.000 | 0.407 | 1.53 |
 | B1 TF-IDF + LogReg | 0.660 | 0.572 | 0.177 / 0.563 | 0.196 | 2.35 |
-| main | 0.705 | 0.661 | 0.238 / 0.625 | 0.105 | 2.40 |
+| main (intent-filtered retrieval) | 0.705 | 0.661 | 0.238 / 0.625 | 0.119 | 2.46 |
 
 Checks: main > B1 > B0 on intent accuracy (Wilson 95% CI 0.64-0.76); risk-subset escalation recall
 14/15 = 0.93. Ablations: threshold 0.40 -> esc-P/R 0.27/0.53, 0.70 -> 0.18/0.69 (0.55 is the sane

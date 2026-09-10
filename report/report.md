@@ -20,11 +20,11 @@ Reality check: the provisioned OpenAI key has no credits left (429 on every call
 |---|---|---|---|---|---|
 | B0 trivial (majority + canned + always-escalate) | 0.415 | 0.059 | 0.160 / 1.000 | 0.407 | 1.53 |
 | B1 TF-IDF + LogReg on weak labels, NN reply | 0.660 | 0.572 | 0.177 / 0.563 | 0.196 | 2.35 |
-| main (tie-break classify + retrieval + policy) | 0.705 | 0.661 | 0.238 / 0.625 | 0.105 | 2.40 |
+| main (tie-break classify + intent-filtered retrieval + policy) | 0.705 | 0.661 | 0.238 / 0.625 | 0.119 | 2.46 |
 
 Main beats both baselines on intent accuracy (Wilson 95% CI 0.64-0.76), macro-F1, escalation F1 (0.34 vs 0.27/0.28), and judge-overall. Risk-subset escalation recall is 14/15 = 0.93 (the one miss: a multi-issue truncated tweet). Overall escalation recall is 0.625 -- the residual misses are vague-but-benign rows the policy auto-handles with a triage question; that is a deliberate precision/recall trade, not a deferred bug fix.
 
-Ablations (same harness): threshold 0.40 -> esc-P/R 0.27/0.53; 0.70 -> 0.18/0.69, confirming 0.55 as the sane middle. No-retrieval (canned replies): judge-overall collapses 2.40 -> 1.82 while ROUGE-L jumps 0.105 -> 0.407 -- retrieval is what makes replies useful, and lexical metrics punish it for not copying the reference templates.
+Ablations (same harness): threshold 0.40 -> esc-P/R 0.27/0.53; 0.70 -> 0.18/0.69, confirming 0.55 as the sane middle. No-retrieval (canned replies): judge-overall collapses 2.46 -> 1.82 while ROUGE-L jumps 0.119 -> 0.407 -- retrieval is what makes replies useful, and lexical metrics punish it for not copying the reference templates. A three-branch experiment loop (LSA dense retrieval: judge 2.04, rejected -- dense compression drops exact keyword matches; ComplementNB: acc 0.675, rejected -- intent regression; intent-filtered retrieval: judge 2.46, merged and default-on) is recorded in git history under `experiment/`.
 
 ## 4. Top-5 failure modes (real golden examples)
 
@@ -36,7 +36,7 @@ Ablations (same harness): threshold 0.40 -> esc-P/R 0.27/0.53; 0.70 -> 0.18/0.69
 
 ## 5. What is misleading about my headline number
 
-Three things flatter or distort the 0.705. First, ROUGE-L prefers the canned baseline (0.41 vs 0.11): my hand-written reply references are action templates sharing n-grams with the B0 canned string, so lexical overlap rewards copying, not helping -- the no-retrieval ablation proves it. Judge-overall and intent accuracy are the honest signals. Second, n = 200 means ~6pp: the main-vs-B1 gap (4.5pp) sits inside overlapping Wilson intervals; treat the ranking as suggestive, not settled. Third, the judge is a heuristic, not an LLM: judge-vs-human agreement is rho = 0.25, kappa = 0.30 (blinded, 50 rows) -- below the 0.50 bar, so all judge claims are directional-only. Related staleness: 2017-era tweets vs current Apple policies, and single-brand/single-turn scope (51% of inbound lacks parent context by construction).
+Three things flatter or distort the 0.705. First, ROUGE-L prefers the canned baseline (0.41 vs 0.11): my hand-written reply references are action templates sharing n-grams with the B0 canned string, so lexical overlap rewards copying, not helping -- the no-retrieval ablation proves it. Judge-overall and intent accuracy are the honest signals. Second, n = 200 means ~6pp: the main-vs-B1 gap (4.5pp) sits inside overlapping Wilson intervals; treat the ranking as suggestive, not settled. Third, the judge is a heuristic, not an LLM: judge-vs-human agreement on final outputs is rho = 0.08, kappa = 0.07 (blinded, 50 rows) -- below the 0.50 bar, so all judge claims are directional-only. Related staleness: 2017-era tweets vs current Apple policies, and single-brand/single-turn scope (51% of inbound lacks parent context by construction).
 
 ## 6. Next week
 

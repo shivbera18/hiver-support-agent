@@ -6,16 +6,17 @@ PII = re.compile(r"\b\d{3}-\d{2}-\d{4}\b|password\s*[:=]\s*\S+|\b\d{13,19}\b", r
 CANNED = "Thanks for reaching out \u2014 could you share your device model and iOS version plus what you\u2019ve tried so far?"
 THRESH = float(__import__('os').environ.get("AGENT_THRESH", "0.55"))
 _model = {}
+_WEAK_KW = {"setup_howto": ["setup", "pair", "how do"], "battery_performance": ["battery", "drain", "overheat", "slow"], "software_update": ["update", "ios", "upgrade"], "account_icloud": ["icloud", "apple id", "login", "password"], "hardware_damage_repair": ["crack", "broken", "repair", "screen"], "warranty_applecare": ["warranty", "applecare", "coverage"], "app_store_itunes": ["app store", "subscription", "itunes"], "connectivity": ["wifi", "bluetooth", "cellular", "airdrop"], "billing_refund": ["refund", "charg", "receipt", "payment"]}
+def _weak(t):
+    t = str(t).lower()
+    for k, words in _WEAK_KW.items():
+        if any(w in t for w in words):
+            return k
+    return "other_offtopic"
 def _local_clf(pool_texts):
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.linear_model import LogisticRegression
-    KW = {"setup_howto":["setup","pair","how do"],"battery_performance":["battery","drain","overheat","slow"],"software_update":["update","ios","upgrade"],"account_icloud":["icloud","apple id","login","password"],"hardware_damage_repair":["crack","broken","repair","screen"],"warranty_applecare":["warranty","applecare","coverage"],"app_store_itunes":["app store","subscription","itunes"],"connectivity":["wifi","bluetooth","cellular","airdrop"],"billing_refund":["refund","charg","receipt","payment"]}
-    def weak(t):
-        t=str(t).lower()
-        for k,w in KW.items():
-            if any(x in t for x in w): return k
-        return "other_offtopic"
-    y=[weak(t) for t in pool_texts]
+    y = [_weak(t) for t in pool_texts]
     vec=TfidfVectorizer(max_features=20000, ngram_range=(1,2)); X=vec.fit_transform([str(t) for t in pool_texts])
     clf=LogisticRegression(max_iter=1000, class_weight="balanced").fit(X,y)
     return vec, clf
@@ -103,19 +104,11 @@ def run(inp, golden, out, sample_n=None, seed=42):
     _model["clf"] = _local_clf(pool.customer_text.tolist())
     R = _retriever(pool)
     R_by_intent = {}
-    if os.environ.get("AGENT_INTENT_FILTER"):
-        KW = {"setup_howto": ["setup", "pair", "how do"], "battery_performance": ["battery", "drain", "overheat", "slow"], "software_update": ["update", "ios", "upgrade"], "account_icloud": ["icloud", "apple id", "login", "password"], "hardware_damage_repair": ["crack", "broken", "repair", "screen"], "warranty_applecare": ["warranty", "applecare", "coverage"], "app_store_itunes": ["app store", "subscription", "itunes"], "connectivity": ["wifi", "bluetooth", "cellular", "airdrop"], "billing_refund": ["refund", "charg", "receipt", "payment"]}
-        def _weak(t):
-            t = str(t).lower()
-            for k, words in KW.items():
-                if any(w in t for w in words):
-                    return k
-            return "other_offtopic"
-        pool["_w"] = pool.customer_text.apply(_weak)
-        for k in INTENTS:
-            sub = pool[pool._w == k]
-            R_by_intent[k] = _retriever(sub) if len(sub) > 5 else R
-        print("intent-filtered retrieval on")
+    pool["_w"] = pool.customer_text.apply(_weak)
+    for k in INTENTS:
+        sub = pool[pool._w == k]
+        R_by_intent[k] = _retriever(sub) if len(sub) > 5 else R
+    print("intent-filtered retrieval on")
     if sample_n: g = g.head(sample_n)
     rows = []
     for _, r in g.iterrows():
