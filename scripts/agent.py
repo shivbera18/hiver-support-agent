@@ -102,12 +102,27 @@ def run(inp, golden, out, sample_n=None, seed=42):
     except Exception as e: print("augment skipped:", e)
     _model["clf"] = _local_clf(pool.customer_text.tolist())
     R = _retriever(pool)
+    R_by_intent = {}
+    if os.environ.get("AGENT_INTENT_FILTER"):
+        KW = {"setup_howto": ["setup", "pair", "how do"], "battery_performance": ["battery", "drain", "overheat", "slow"], "software_update": ["update", "ios", "upgrade"], "account_icloud": ["icloud", "apple id", "login", "password"], "hardware_damage_repair": ["crack", "broken", "repair", "screen"], "warranty_applecare": ["warranty", "applecare", "coverage"], "app_store_itunes": ["app store", "subscription", "itunes"], "connectivity": ["wifi", "bluetooth", "cellular", "airdrop"], "billing_refund": ["refund", "charg", "receipt", "payment"]}
+        def _weak(t):
+            t = str(t).lower()
+            for k, words in KW.items():
+                if any(w in t for w in words):
+                    return k
+            return "other_offtopic"
+        pool["_w"] = pool.customer_text.apply(_weak)
+        for k in INTENTS:
+            sub = pool[pool._w == k]
+            R_by_intent[k] = _retriever(sub) if len(sub) > 5 else R
+        print("intent-filtered retrieval on")
     if sample_n: g = g.head(sample_n)
     rows = []
     for _, r in g.iterrows():
         t = str(r["customer_text"]); ctx = str(r.get("context_parent_text", "") or "")
         intent, conf = classify(t, ctx)
-        ret = [] if __import__("os").environ.get("AGENT_NORETRIEVAL") else _retrieve(t, R)
+        R_use = R_by_intent.get(intent, R) if R_by_intent else R
+        ret = [] if __import__("os").environ.get("AGENT_NORETRIEVAL") else _retrieve(t, R_use)
         reply = draft_reply(t, ctx, intent, ret)
         if PII.search(reply): reply = PII.sub("[REDACTED]", reply); esc, reason = True, "SAFETY:pii-redacted"
         else: esc, reason = decide(t, intent, conf)
