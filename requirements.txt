@@ -1,0 +1,14 @@
+scikit-learn==1.3.2
+pandas==2.2.2
+numpy==1.26.4
+sentence-transformers==2.7.0
+openai>=1.0
+rouge-score
+bert-score
+krippendorff
+pyyaml
+tqdm
+matplotlib
+langdetect
+kagglehub
+scipy
