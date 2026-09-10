@@ -1,0 +1,10 @@
+{
+  "n_overlap": 50,
+  "judge_spearman": 0.245,
+  "judge_kappa": 0.297,
+  "exact_agreement": 0.38,
+  "intent_kappa": 0.974,
+  "verdict": "directional-only",
+  "intent_kappa_note": "same-session re-label (48h gap infeasible); inflated, reported as upper bound",
+  "n_relabel": 50
+}

@@ -1,0 +1,34 @@
+{
+  "n": 200,
+  "intent_acc": 0.415,
+  "intent_macro_f1": 0.0587,
+  "per_intent_f1": {
+    "account_icloud": 0.0,
+    "app_store_itunes": 0.0,
+    "battery_performance": 0.0,
+    "billing_refund": 0.0,
+    "connectivity": 0.0,
+    "hardware_damage_repair": 0.0,
+    "other_offtopic": 0.5866,
+    "setup_howto": 0.0,
+    "software_update": 0.0,
+    "warranty_applecare": 0.0
+  },
+  "esc_precision": 0.16,
+  "esc_recall": 1.0,
+  "esc_f1": 0.2759,
+  "esc_confusion_tn_fp_fn_tp": [
+    [
+      0,
+      168
+    ],
+    [
+      0,
+      32
+    ]
+  ],
+  "rougeL": 0.4072,
+  "reply_cosine": 0.2613,
+  "esc_rate": 1.0,
+  "mean_reply_len": 106.0
+}
