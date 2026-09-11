@@ -19,6 +19,13 @@ try:
     _HAVE_PYDANTIC = True
 except Exception: _HAVE_PYDANTIC = False
 _model = {}
+_GPT = None
+def _gpt():
+    global _GPT
+    if _GPT is None:
+        from openai import OpenAI
+        _GPT = OpenAI(max_retries=0)
+    return _GPT
 _USAGE = {"calls": 0, "ok": 0, "prompt_tokens": 0, "completion_tokens": 0, "fallback_rows": 0}
 def _log_call(stage, model, ok, err="", usage=None):
     import json as _j
@@ -56,15 +63,24 @@ def _retriever(pool):
         vec = TfidfVectorizer(max_features=20000, ngram_range=(1,2))
         E = vec.fit_transform(rep.customer_text.astype(str))
         return ("tfidf", vec, rep, E)
+def _oretry(fn, tries=3):
+    import time
+    for i in range(tries):
+        try: return fn()
+        except Exception as e:
+            print(f"gpt try {i+1} failed:", str(e)[:100], flush=True)
+            time.sleep(3 * (i + 1))
+    return None
+
 def _gpt_classify(text, context):
     try:
-        from openai import OpenAI
-        c = OpenAI()
+        c = _gpt()
         prompt = open("prompts/intent_prompt.txt").read()
         msg = f"CURRENT: {text}\nPARENT: {context}"
-        r = c.chat.completions.create(model=OPENAI_MODEL, response_format={"type": "json_object"},
+        r = _oretry(lambda: c.chat.completions.create(model=OPENAI_MODEL, response_format={"type": "json_object"},
             messages=[{"role": "system", "content": prompt}, {"role": "user", "content": msg}],
-            max_completion_tokens=600)
+            max_completion_tokens=600, timeout=60))
+        if r is None: raise RuntimeError("gpt unreachable after retries")
         d = IntentOut.model_validate_json(r.choices[0].message.content)
         _log_call("classify", OPENAI_MODEL, True, usage=r.usage)
         return str(d.intent), float(d.confidence)
@@ -123,13 +139,13 @@ def classify(text, context=""):
         return "billing_refund", max(conf, 0.65)
     return pred, conf
 def _gpt_reply(text, context, intent, hist):
-    from openai import OpenAI
-    c = OpenAI()
+    c = _gpt()
     prompt = open("prompts/reply_prompt.txt").read()
     msg = f"INTENT: {intent}\nCUSTOMER: {text}\nCONTEXT: {context}\nHISTORICAL RESOLUTIONS:\n{hist}"
-    r = c.chat.completions.create(model=OPENAI_MODEL,
+    r = _oretry(lambda: c.chat.completions.create(model=OPENAI_MODEL,
         messages=[{"role": "system", "content": prompt}, {"role": "user", "content": msg}],
-        max_completion_tokens=1000)
+        max_completion_tokens=1000, timeout=90))
+    if r is None: raise RuntimeError("gpt unreachable after retries")
     _log_call("reply", OPENAI_MODEL, True, usage=r.usage)
     return r.choices[0].message.content.strip()[:280]
 
@@ -192,18 +208,27 @@ def run(inp, golden, out, sample_n=None, seed=42):
         R_by_intent[k] = _retriever(sub) if len(sub) > 5 else R
     print("intent-filtered retrieval on")
     if sample_n: g = g.head(sample_n)
-    rows = []
-    for _, r in g.iterrows():
-        t = str(r["customer_text"]); ctx = str(r.get("context_parent_text", "") or "")
-        intent, conf = classify(t, ctx)
-        R_use = R_by_intent.get(intent, R) if R_by_intent else R
-        ret = [] if __import__("os").environ.get("AGENT_NORETRIEVAL") else _retrieve(t, R_use)
-        reply = draft_reply(t, ctx, intent, ret)
-        if PII.search(reply): reply = PII.sub("[REDACTED]", reply); esc, reason = True, "SAFETY:pii-redacted"
-        else: esc, reason = decide(t, intent, conf)
-        if "refund" in reply.lower() and "eligib" not in reply.lower() and "cannot promise" not in reply.lower():
-            esc, reason = True, "RISK:refund-promise-check"
-        rows.append({"id": str(r["id"]), "intent": intent, "reply": reply, "escalate": bool(esc), "reason": reason, "conf": float(conf)})
+    workers = int(os.environ.get("AGENT_WORKERS", "8"))
+    items = [(str(r["id"]), str(r["customer_text"]), str(r.get("context_parent_text", "") or "")) for _, r in g.iterrows()]
+    def _one(item):
+        _id, t, ctx = item
+        try:
+            intent, conf = classify(t, ctx)
+            R_use = R_by_intent.get(intent, R) if R_by_intent else R
+            ret = [] if os.environ.get("AGENT_NORETRIEVAL") else _retrieve(t, R_use)
+            reply = draft_reply(t, ctx, intent, ret)
+            if PII.search(reply): reply = PII.sub("[REDACTED]", reply); esc, reason = True, "SAFETY:pii-redacted"
+            else: esc, reason = decide(t, intent, conf)
+            if "refund" in reply.lower() and "eligib" not in reply.lower() and "cannot promise" not in reply.lower():
+                esc, reason = True, "RISK:refund-promise-check"
+            return {"id": _id, "intent": intent, "reply": reply, "escalate": bool(esc), "reason": reason, "conf": float(conf)}
+        except Exception as e:
+            print(f"ROW ERROR id={_id}: {str(e)[:150]}")
+            return {"id": _id, "intent": "other_offtopic", "reply": CANNED, "escalate": True, "reason": "ERROR:row-failed", "conf": 0.0}
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        rows = list(ex.map(_one, items))
+    rows.sort(key=lambda d: d["id"])
     import json as _j
     floor = float(os.environ.get("LLM_MIN_SUCCESS", "0.8"))
     rate = _USAGE["ok"] / max(_USAGE["calls"], 1)

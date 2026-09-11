@@ -49,15 +49,15 @@ def llm_judge(rubric, r):
                 return [d.groundedness, d.helpfulness, d.tone, d.safety, d.overall, d.hallucinated, "gemini-llm"]
             import time
             from openai import OpenAI
-            c = OpenAI()
+            c = OpenAI(max_retries=0)
             resp, err = None, ""
-            for i in range(3):
+            for i in range(4):
                 try:
                     resp = c.chat.completions.create(model=OPENAI_MODEL, response_format={"type": "json_object"},
                         messages=[{"role": "system", "content": rubric}, {"role": "user", "content": msg}],
-                        max_completion_tokens=1000); break
+                        max_completion_tokens=1000, timeout=90); break
                 except Exception as e:
-                    err = str(e)[:100]; print(f"gpt judge try {i+1}: {err}"); time.sleep(3 * (i + 1))
+                    err = str(e)[:100]; print(f"gpt judge try {i+1}: {err}"); time.sleep(5 * (i + 1))
             if resp is None: raise RuntimeError(err)
             d = JudgeOut.model_validate_json(resp.choices[0].message.content)
             _JUSE["ok"] += 1; _JUSE["llm_rows"] += 1
