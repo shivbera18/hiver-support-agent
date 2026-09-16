@@ -21,7 +21,8 @@ What each step does and costs (measured on a Windows 11 laptop, Python 3.11):
 |---|---|---|
 | `make setup` | `pip install -r requirements.txt` | ~4 min first time |
 | `make data` | `download_data.py` (kagglehub, 200k-row sample, seed 42) -> `eda.py` -> `build_threads.py --brand AppleSupport` | ~2 min after download |
-| `make eval` | baselines -> agent -> `run_eval` x3 -> `judge` x3 -> `agreement` -> `failure_mine` | ~62 s |
+| `make eval` | baselines -> TF-IDF agent -> `run_eval` x3 -> heuristic judge x3 -> `agreement` -> `failure_mine` | ~62 s, offline, no keys |
+| `make eval-llm` | fusion agent (gpt-5-mini) -> `run_eval` -> LLM judge x4 systems -> `agreement` | ~10 min agent + ~35 min/judged system, ~350k tokens agent run, needs keys |
 | `make report-check` | golden 150-250 rows, artifacts exist, report <= 3000 words | instant |
 
 With keys (`OPENAI_API_KEY`, optional `GEMINI_API_KEY` + `GEMINI_ENABLE` in `.env`, see `.env.example`

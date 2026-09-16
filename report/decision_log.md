@@ -2,15 +2,15 @@
 - AppleSupport over airlines: volume + scopable troubleshooting, less moderation risk. Rejected: airlines (anger/delay spikes).
 - 10 intents not 77: covers ~90% traffic, labellable in budget. Rejected: Banking77 taxonomy (domain mismatch).
 - Time-split 80/20 not shuffle: prevents temporal leakage. Rejected: random split.
-- MiniLM local embeddings default: free/offline/<15min. Rejected: OpenAI embeddings (cost+friction).
-- gpt-4o-mini + TF-IDF fallback: $1 total, pipeline runs keyless. Rejected: larger models.
+- gpt-5-mini + gemini cascade + TF-IDF fallback: best acc (0.805) with keyless repro intact. Rejected: single-model lock-in.
 - Threshold 0.55 w/ recall floor 0.85: tuned once on B1 dev. Rejected: per-system tuning (overfits headline).
 - 200 golden stratified+adversarial: inside 150-250 band. Rejected: more rows (labelling cost).
-- Single-turn fallback for orphans (~30%): context optional. Rejected: dropping orphans.
+- Single-turn fallback for orphans (~51%): context optional. Rejected: dropping orphans.
 - Banking77 few-shot wording only: never train on it. Rejected: joint training (inflates numbers).
 - Blinded judge (no system name): prevents favoritism. Rejected: named comparison.
-- kappa>=0.60 / rho>=0.50 bars, downgrade-not-resample: honesty over chasing.
+- kappa>=0.60 / rho>=0.50 bars, downgrade-not-resample: honesty over chasing (fusion judge rho=-0.15 stays directional-only).
 - No fine-tune, no live posting, no multilingual: batch pipeline scope. Rejected: service/DB/UI.
-- Heuristic judge with overall=min(dims) after credits ran out: customer-overlap grounding + intent-match bonus; reported directional-only (rho 0.25). Rejected: constant-3 fallback (zero signal) and pretending scores are LLM-judged.
-- billing_refund intent always escalates + widened risk stems (charg/phish/expir): risk recall 0.80 -> 0.93. Rejected: lowering the 0.55 threshold (would overfit the headline).
-- Experiment loop with PR-style review: LSA retrieval rejected (judge 2.04, torch MiniLM unloadable on this box and dense SVD drops keywords), ComplementNB rejected (acc 0.675 < 0.705 despite esc recall 0.97), intent-filtered retrieval merged + default-on (judge 2.46, zero intent change). Review forced one cleanup: single shared weak-label map. Rejected: keeping experiments env-gated forever.
+- billing_refund intent always escalates + widened risk stems: risk recall 0.80 -> 0.93. Rejected: lowering the threshold.
+- Intent-filtered retrieval merged + default-on (judge 2.46); LSA/ComplementNB rejected with numbers. Rejected: env-gated-forever experiments.
+- Loud LLM ledger + abort gates (LLM_MIN_SUCCESS=0.8): refuses to label fallback output as LLM results. Rejected: silent try/except fallbacks.
+- Pydantic on every LLM output (IntentOut/JudgeOut, bounded dims): schema-invalid scores never enter metrics. Rejected: raw JSON parsing.
