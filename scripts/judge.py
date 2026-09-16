@@ -6,10 +6,11 @@ except Exception: pass
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
 try:
-    from pydantic import BaseModel, confloat
+    from pydantic import BaseModel, confloat, conint
     from typing import Literal
+    Dim = conint(ge=1, le=5)
     class JudgeOut(BaseModel):
-        groundedness: int; helpfulness: int; tone: int; safety: int; overall: int
+        groundedness: Dim; helpfulness: Dim; tone: Dim; safety: Dim; overall: Dim
         hallucinated: Literal["yes", "no"]
     _HAVE_PYDANTIC = True
 except Exception: _HAVE_PYDANTIC = False
@@ -29,6 +30,14 @@ def heuristic(r):
     overall = min(grounded, helpful, tone, safety)
     return [grounded, helpful, tone, safety, overall, hall]
 _JUSE = {"calls": 0, "ok": 0, "llm_rows": 0}
+def _gretry(fn, tries=3):
+    import time
+    for i in range(tries):
+        try: return fn()
+        except Exception as e:
+            print(f"judge try {i+1} failed:", str(e)[:100]); time.sleep(3 * (i + 1))
+    return None
+
 def llm_judge(rubric, r):
     global _JUSE
     msg = "GOLDEN REFERENCE: " + str(r.reply_reference) + "\nCANDIDATE REPLY: " + str(r.reply) + "\nCUSTOMER: " + str(r.customer_text)[:300] + "\nReturn JSON only: {\"groundedness\": 1-5, \"helpfulness\": 1-5, \"tone\": 1-5, \"safety\": 1-5, \"overall\": 1-5, \"hallucinated\": \"yes\"/\"no\"}"
@@ -42,7 +51,8 @@ def llm_judge(rubric, r):
                 import time
                 from google import genai
                 g = genai.Client()
-                resp = g.models.generate_content(model=GEMINI_MODEL, contents=rubric + "\n" + msg)
+                resp = _gretry(lambda: g.models.generate_content(model=GEMINI_MODEL, contents=rubric + "\n" + msg, config={"http_options": {"timeout": 90000}}))
+                if resp is None: raise RuntimeError("gemini judge unreachable")
                 t = re.sub(r"^```(json)?|```$", "", resp.text.strip()).strip()
                 d = JudgeOut.model_validate_json(t)
                 _JUSE["ok"] += 1; _JUSE["llm_rows"] += 1

@@ -27,13 +27,16 @@ def _gpt():
         _GPT = OpenAI(max_retries=0)
     return _GPT
 _USAGE = {"calls": 0, "ok": 0, "prompt_tokens": 0, "completion_tokens": 0, "fallback_rows": 0}
+import threading as _th
+_USAGE_LOCK = _th.Lock()
 def _log_call(stage, model, ok, err="", usage=None):
     import json as _j
-    _USAGE["calls"] += 1
-    if ok: _USAGE["ok"] += 1
+    with _USAGE_LOCK: _USAGE["calls"] += 1
+    if ok:
+        with _USAGE_LOCK: _USAGE["ok"] += 1
     pt = (usage.prompt_tokens if usage and hasattr(usage, "prompt_tokens") else 0) or 0
     ct = (usage.completion_tokens if usage and hasattr(usage, "completion_tokens") else 0) or 0
-    _USAGE["prompt_tokens"] += pt; _USAGE["completion_tokens"] += ct
+    with _USAGE_LOCK: _USAGE["prompt_tokens"] += pt; _USAGE["completion_tokens"] += ct
     print(f"LLM {stage} {model} {'OK' if ok else 'FAIL:' + str(err)[:100]} tok={pt}/{ct}", flush=True)
 _WEAK_KW = {"setup_howto": ["setup", "pair", "how do"], "battery_performance": ["battery", "drain", "overheat", "slow"], "software_update": ["update", "ios", "upgrade"], "account_icloud": ["icloud", "apple id", "login", "password"], "hardware_damage_repair": ["crack", "broken", "repair", "screen"], "warranty_applecare": ["warranty", "applecare", "coverage"], "app_store_itunes": ["app store", "subscription", "itunes"], "connectivity": ["wifi", "bluetooth", "cellular", "airdrop"], "billing_refund": ["refund", "charg", "receipt", "payment"]}
 def _weak(t):
@@ -127,7 +130,7 @@ def classify(text, context=""):
         pred, conf = max(votes, key=lambda v: v[1])
     else:
         if os.environ.get("OPENAI_API_KEY") or os.environ.get("GEMINI_API_KEY"):
-            _USAGE["fallback_rows"] += 1
+            with _USAGE_LOCK: _USAGE["fallback_rows"] += 1
             print("ROW FALLBACK: no llm votes, tfidf classify")
         vec, clf = _model["clf"]; p = clf.predict_proba(vec.transform([text]))[0]
         pred, conf = str(clf.classes_[p.argmax()]), float(p.max())
