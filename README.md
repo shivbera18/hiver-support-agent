@@ -1,13 +1,11 @@
-# Hiver SDE Intern -- AI Support Agent for AppleSupport
+# Customer Support Agent — AppleSupport
 
-An AI customer-support agent built on real Twitter support conversations. Given an incoming customer
-message, it (1) classifies it into a self-defined intent set, (2) drafts a reply grounded in how
-AppleSupport historically resolved similar issues, and (3) decides auto-handle vs. escalate with a
-stated reason -- then proves it can be trusted with a golden set, baselines, and a judged eval harness.
-
-Assignment: `Hiver SDE Intern Assignment.pdf` (in repo root). Source: Kaggle
-`thoughtvector/customer-support-on-twitter` (~3M tweets, multi-turn, noisy). Secondary data
-(PolyAI/banking77) used for intent wording analogues only -- never trained on.
+An AI support agent for AppleSupport Twitter conversations. It classifies each incoming customer
+message into a small intent set defined from the data, drafts a reply grounded in how the brand
+historically resolved similar issues, and decides auto-handle vs. escalate with a stated reason.
+Built on the Kaggle Customer Support on Twitter data (thoughtvector/customer-support-on-twitter,
+200k-row subsample, seed 42). Banking77 wording analogues informed the intent prompt; no training
+on Banking77.
 
 ## 1. Reproduce headline results (< 15 min, CPU-only laptop)
 
@@ -46,9 +44,11 @@ scripts/          download_data, eda, build_threads, make_golden,
 prompts/          intent_prompt, reply_prompt, judge_rubric, escalate_policy (policy also coded in agent.py)
 data/             twcs_raw.csv (200k sample), threads_sample.csv (21,602 AppleSupport threads),
                   golden.csv (200 hand-labelled), golden_guide.md (sampling + labelling note)
-results/          predictions_*.jsonl, metrics*.json, judge_*.csv, human_scores.csv (50 blind rows),
-                  agreement.json, failures.md, eda_summary.csv, brand_volume.png
-report/           report.md (<=6 pages), decision_log.md (14 decisions)
+results/          predictions_{baseline_trivial,baseline_tfidf,main,fusion}.jsonl,
+                  metrics{,_trivial,_tfidf,_fusion}.json, judge_{trivial,tfidf,main,fusion}.csv,
+                  human_scores.csv (50 blind rows), agreement{,_fusion}.json, failures.md,
+                  eda_summary.csv, brand_volume.png
+report/           report.md (<=6 pages), decision_log.md (15 decisions)
 EVAL.md           harness definition: metrics, splits, commands, fallback status
 ```
 
@@ -115,7 +115,7 @@ esc-P/R 0.27/0.53, 0.70 -> 0.18/0.69 (0.55 is the sane middle); no-retrieval col
 1.82 while ROUGE-L jumps 0.119 -> 0.407 -- retrieval is what makes replies useful, and lexical
 metrics punish it for not copying reference templates.
 
-## 6. Golden set (deliverable 2)
+## 5. Golden set (200 hand-labelled examples + sampling note)
 
 `data/golden.csv`: 200 rows -- 15/intent weak-label buckets x 10 (= 150) + 30 uniform random + 20
 adversarial (short, ALL-CAPS, sarcasm, non-English, multi-intent). Columns:
@@ -127,7 +127,7 @@ a 50-row second pass flipped 1 label (charge tie-break) and gives intra-annotato
 account_icloud 16, app_store_itunes 12, hardware_damage_repair 11, billing_refund 11,
 battery_performance 10, warranty_applecare 10, setup_howto 6; escalate rate 0.16.
 
-## 7. Eval harness + judge + agreement (deliverable 3)
+## 6. Evaluation harness + LLM judge + human agreement
 
 `scripts/run_eval.py`: intent accuracy, macro-F1, per-intent F1; escalation P/R/F1 + confusion;
 ROUGE-L + TF-IDF cosine (+ BERTScore hook -- null on this box, torch DLL unloadable, logged not
@@ -141,7 +141,7 @@ tone-brand-fit, safety, overall = weakest dim, hallucinated flag), pydantic-vali
 rows -- below the 0.50 bar, so every judge number in this repo stays **directional-only**, even
 with a real LLM judge. This file is the required agreement evidence; EVAL.md records the status.
 
-## 8. Failure modes, misleading number, next week (report sections 4-6)
+## 7. Report: framing, failure modes, misleading number, next week
 
 Top-5 (one real example + hypothesis each, full detail in `report/report.md`): (1) off-topic "how
 do I" queries -> money/setup intents (7x, persists under fusion) -- needs a brand-relevance gate;
@@ -158,16 +158,14 @@ scope. Next week: 100 more adversarial labels, per-intent thresholds, brand-rele
 human-in-the-loop queue mock measuring time-to-resolution. `report/decision_log.md` lists the 15
 non-obvious decisions and what was rejected for each.
 
-## 9. What was NOT built
+## 8. What was not built
 
 No live posting or streaming, no multi-brand support, no fine-tuning, no multilingual handling,
 no API server/DB/frontend. Banking77: wording analogues in the intent prompt only, never trained on.
 SBERT embeddings and BERTScore: attempted, unloadable on this box (torch DLL) -- TF-IDF retrieval
-and cosine fallback used instead, logged not silent.
+## 9. Borrowings and references
 
-## 10. Borrowings and submission
-
-Borrowed and cited: Kaggle twcs (thoughtvector), Banking77 (Casanueva et al. 2020), scikit-learn,
-rouge-score, OpenAI gpt-5-mini, Google Gemini (flash-latest, quota-limited). AI coding assistance
-used throughout; every line was read, repaired, and verified by the author (see commit history,
-PR #1 review loop). Submit via the Notion form with this repo link; no email.
+Borrowed and cited: Kaggle Customer Support on Twitter (thoughtvector), Banking77
+(Casanueva et al. 2020, wording analogues only), scikit-learn (TF-IDF/LogReg), rouge-score,
+OpenAI gpt-5-mini, Google Gemini (flash-latest, quota-limited). AI coding assistance used
+throughout; every line was read, repaired, and verified by the author (see commit history).
