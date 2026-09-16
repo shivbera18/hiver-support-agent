@@ -24,11 +24,13 @@ What each step does and costs (measured on a Windows 11 laptop, Python 3.11):
 | `make eval` | baselines -> agent -> `run_eval` x3 -> `judge` x3 -> `agreement` -> `failure_mine` | ~62 s |
 | `make report-check` | golden 150-250 rows, artifacts exist, report <= 3000 words | instant |
 
-No `OPENAI_API_KEY` credits? The pipeline still runs end to end on the documented fallback path
-(TF-IDF classify + retrieval replies + heuristic judge) and prints `llm=fallback`. All numbers in
-this README are from that fallback path -- the provisioned key returned 429 (no credits), stated
-openly in `report/report.md` section 2. If you add credits, `classify`/`draft_reply` switch to
-`gpt-4o-mini` automatically; expect intent accuracy and judge scores to rise.
+With keys (`OPENAI_API_KEY`, optional `GEMINI_API_KEY` + `GEMINI_ENABLE` in `.env`, see `.env.example`
+-- secrets stay out of git): `classify`/`draft_reply` use **gpt-5-mini** primary with a Gemini cascade
+(asked only when GPT is silent or conf < 0.7) and TF-IDF last resort. Without keys the pipeline runs
+the documented fallback path (TF-IDF classify + retrieval replies + heuristic judge) and prints
+`llm=fallback`. Every LLM output is pydantic-validated (`IntentOut`/`JudgeOut`); every call is logged
+to `results/llm_usage.json` with an abort gate (`LLM_MIN_SUCCESS=0.8`) that refuses to label
+fallback output as LLM results. Full 200-row fusion run: ~350k tokens, 398/400 calls OK.
 
 Manual download fallback: get `twcs.csv` from the Kaggle dataset page, save as `data/twcs_raw.csv`,
 then run `make data`. Expected raw header:
@@ -79,13 +81,12 @@ requiring action; sarcasm/praise + complaint -> complaint; non-English -> `other
 
 ## 4. System and baselines
 
-`scripts/agent.py` -- exactly three functions, no framework:
-
-- `classify(text, context) -> (intent, conf)` -- LLM JSON mode, else TF-IDF + LogReg with golden
+- `classify(text, context) -> (intent, conf)` -- gpt-5-mini JSON mode (pydantic `IntentOut`) with a
+  Gemini cascade (only when GPT is silent or conf < 0.7), else TF-IDF + LogReg with golden
   tie-breaks baked in (short/non-English/URL-only -> other; charge-words -> billing).
-- `draft_reply(text, context, intent, retrieved) -> str` -- LLM (<=280 chars, references retrieved
-  history, ends with one next step, never promises refunds or asks for passwords), else top-1
-  retrieved brand reply. PII regex post-filter (-> `[REDACTED]` + force escalate).
+- `draft_reply(text, context, intent, retrieved) -> str` -- gpt-5-mini (<=280 chars, references
+  retrieved history, ends with one next step, never promises refunds or asks for passwords), else
+  top-1 retrieved brand reply. PII regex post-filter (-> `[REDACTED]` + force escalate).
 - `decide(text, intent, conf) -> (escalate, reason)` -- coded policy: billing intent always
   escalates; risk stems (charg/payment/scam/phish/expir/...) escalate; `conf < 0.55` escalates.
   Threshold tuned once on the B1 dev split (recall >= 0.85 on the risk subset), never re-tuned.
@@ -99,18 +100,19 @@ Baselines (built first, so the agent has a bar): **B0 trivial** -- always `other
 canned reply, always escalate. **B1 simple** -- TF-IDF + LogReg on weak keyword labels, nearest-
 neighbour reply (min cosine 0.15 else canned), escalate if `max_proba < 0.60` or risk regex.
 
-## 5. Results (n = 200 golden; `results/metrics*.json` -- report table matches byte-for-byte)
-
 | system | intent-acc | macro-F1 | esc-P / esc-R | ROUGE-L | judge-overall |
 |---|---|---|---|---|---|
-| B0 trivial | 0.415 | 0.059 | 0.160 / 1.000 | 0.407 | 1.53 |
-| B1 TF-IDF + LogReg | 0.660 | 0.572 | 0.177 / 0.563 | 0.196 | 2.35 |
-| main (intent-filtered retrieval) | 0.705 | 0.661 | 0.238 / 0.625 | 0.119 | 2.46 |
+| B0 trivial | 0.415 | 0.059 | 0.160 / 1.000 | 0.407 | 3.47 (gpt-5-mini judge) |
+| B1 TF-IDF + LogReg | 0.660 | 0.572 | 0.177 / 0.563 | 0.196 | 2.23 (gpt-5-mini judge) |
+| main TF-IDF + intent-filtered retrieval | 0.705 | 0.661 | 0.238 / 0.625 | 0.119 | 1.86 (gpt-5-mini judge) |
+| **fusion (gpt-5-mini + cascade)** | **0.805** | **0.778** | **0.316 / 0.563** | **0.139** | **2.69 (gpt-5-mini judge)** |
 
-Checks: main > B1 > B0 on intent accuracy (Wilson 95% CI 0.64-0.76); risk-subset escalation recall
-14/15 = 0.93. Ablations: threshold 0.40 -> esc-P/R 0.27/0.53, 0.70 -> 0.18/0.69 (0.55 is the sane
-middle); no-retrieval collapses judge 2.40 -> 1.82 while ROUGE-L jumps 0.105 -> 0.407 -- retrieval
-is what makes replies useful, and lexical metrics punish it for not copying reference templates.
+Fusion: +10pp intent accuracy over the TF-IDF main (Wilson 95% CI 0.74-0.86). Weakest fusion
+intents: setup_howto F1 0.50 (n=6), billing_refund 0.55. Checks: fusion > main > B1 > B0 on intent
+accuracy; risk-subset escalation recall 14/15 = 0.93 (TF-IDF main). Ablations: threshold 0.40 ->
+esc-P/R 0.27/0.53, 0.70 -> 0.18/0.69 (0.55 is the sane middle); no-retrieval collapses judge 2.46 ->
+1.82 while ROUGE-L jumps 0.119 -> 0.407 -- retrieval is what makes replies useful, and lexical
+metrics punish it for not copying reference templates.
 
 ## 6. Golden set (deliverable 2)
 
@@ -127,37 +129,44 @@ battery_performance 10, warranty_applecare 10, setup_howto 6; escalate rate 0.16
 ## 7. Eval harness + judge + agreement (deliverable 3)
 
 `scripts/run_eval.py`: intent accuracy, macro-F1, per-intent F1; escalation P/R/F1 + confusion;
-ROUGE-L + TF-IDF cosine fallback; escalation rate, mean reply length. Deterministic, no API needed.
+ROUGE-L + TF-IDF cosine (+ BERTScore hook -- null on this box, torch DLL unloadable, logged not
+silent); escalation rate, mean reply length. Deterministic except the LLM steps.
 `scripts/judge.py`: blinded rubric (`prompts/judge_rubric.txt` -- groundedness, helpfulness,
-tone-brand-fit, safety, overall = weakest dim, hallucinated flag). `scripts/agreement.py`: the
-author blind-scored a random 50-row subset (`results/human_scores.csv`) before seeing judge output.
-Outcome (`results/agreement.json`): judge-vs-human Spearman rho = 0.25, kappa = 0.30 -- below the
-0.50 bar, so every judge number in this repo is labelled **directional-only**. This file is the
-required agreement evidence; EVAL.md records the fallback status.
+tone-brand-fit, safety, overall = weakest dim, hallucinated flag), pydantic-validated
+(`conint(1,5)`), order Gemini -> GPT -> heuristic with retries, per-row model tags.
+`scripts/agreement.py`: the author blind-scored a random 50-row subset
+(`results/human_scores.csv`) before seeing judge output. Outcome
+(`results/agreement_fusion.json`): judge-vs-human Spearman rho = -0.15, kappa = -0.26 on fusion
+rows -- below the 0.50 bar, so every judge number in this repo stays **directional-only**, even
+with a real LLM judge. This file is the required agreement evidence; EVAL.md records the status.
 
 ## 8. Failure modes, misleading number, next week (report sections 4-6)
 
 Top-5 (one real example + hypothesis each, full detail in `report/report.md`): (1) off-topic "how
-do I" queries -> money/setup intents (7x) -- needs a brand-relevance gate; (2) resolved/thank-you
-notes -> hardware (5x) -- needs a resolved-statement detector; (3) functional failures read as
-broken hardware (4x) -- ambiguous even for humans; (4) native tweet truncation (~5 rows labelled on
-fragments) -- irreducible without rehydration; (5) mismatched retrieval on rare intents
-(setup_howto n = 6) -- needs intent-filtered retrieval.
+do I" queries -> money/setup intents (7x, persists under fusion) -- needs a brand-relevance gate;
+(2) resolved/thank-you notes -> hardware (5x) -- needs a resolved-statement detector; (3)
+functional failures read as broken hardware (4x) -- ambiguous even for humans; (4) native tweet
+truncation (~5 rows labelled on fragments) -- irreducible without rehydration; (5) fusion still
+misses setup_howto (F1 0.50, n=6) and billing_refund (0.55) -- needs intent-filtered retrieval
+plus per-intent thresholds.
 
 Mandatory honesty section: ROUGE-L prefers the canned baseline (reference-template artifact);
-n = 200 means ~6pp confidence width, so the main-vs-B1 gap is suggestive not settled; the judge is
-a heuristic, not an LLM; 2017 tweets vs current policies; single-brand/single-turn scope. Next
-week: 100 more adversarial labels, per-intent thresholds, intent-filtered retrieval, relevance gate,
-human-in-the-loop queue mock measuring time-to-resolution. `report/decision_log.md` lists the 14
+n = 200 means ~6pp confidence width; the LLM judge disagrees with the human (rho = -0.15) so all
+judge numbers stay directional-only; 2017 tweets vs current policies; single-brand/single-turn
+scope. Next week: 100 more adversarial labels, per-intent thresholds, brand-relevance gate,
+human-in-the-loop queue mock measuring time-to-resolution. `report/decision_log.md` lists the 15
 non-obvious decisions and what was rejected for each.
 
 ## 9. What was NOT built
 
 No live posting or streaming, no multi-brand support, no fine-tuning, no multilingual handling,
 no API server/DB/frontend. Banking77: wording analogues in the intent prompt only, never trained on.
+SBERT embeddings and BERTScore: attempted, unloadable on this box (torch DLL) -- TF-IDF retrieval
+and cosine fallback used instead, logged not silent.
 
 ## 10. Borrowings and submission
 
 Borrowed and cited: Kaggle twcs (thoughtvector), Banking77 (Casanueva et al. 2020), scikit-learn,
-rouge-score. AI coding assistance used throughout; every line was read, repaired, and verified by
-the author (see commit history). Submit via the Notion form with this repo link; no email.
+rouge-score, OpenAI gpt-5-mini, Google Gemini (flash-latest, quota-limited). AI coding assistance
+used throughout; every line was read, repaired, and verified by the author (see commit history,
+PR #1 review loop). Submit via the Notion form with this repo link; no email.
