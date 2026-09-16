@@ -34,10 +34,17 @@ def main():
     cm = confusion_matrix(ye, pe, labels=[False, True]).tolist()
     hyps = m.reply.fillna("").tolist(); refs = m.reply_reference.fillna("").tolist()
     rl = rouge_l(hyps, refs); cs = cos_sim(hyps, refs)
+    try:
+        from bert_score import score as _bs
+        _, _, bf = _bs(hyps, refs, lang="en", model_type="distilbert-base-uncased", verbose=False)
+        bsf = round(float(bf.mean()), 4)
+    except Exception as e:
+        print("bertscore skipped:", str(e)[:120]); bsf = None
     out = {"n": len(m), "intent_acc": round(float(acc),4), "intent_macro_f1": round(float(mf1),4),
       "per_intent_f1": {k: round(float(v),4) for k, v in zip(sorted(set(yt)|set(yp)), per)},
       "esc_precision": round(float(p),4), "esc_recall": round(float(r),4), "esc_f1": round(float(f),4),
       "esc_confusion_tn_fp_fn_tp": cm, "rougeL": round(float(rl),4), "reply_cosine": round(float(cs),4),
+      "bertscore_f1": bsf,
       "esc_rate": round(float(np.mean(pe)),4), "mean_reply_len": round(float(np.mean([len(h) for h in hyps])),1)}
     json.dump(out, open(a.out, "w"), indent=2); print(json.dumps(out, indent=2))
     if a.tune_threshold:
